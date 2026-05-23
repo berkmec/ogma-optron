@@ -8,7 +8,7 @@
 
 ogma-optron takes a screenshot or image, extracts visual intent (error screen, repo view, UI dashboard, etc.), builds a small task graph, and routes the work to agents:
 
-- Vision + OCR analysis via Qwen/Qwen3-VL-8B-Instruct on HuggingFace.
+- Vision + OCR analysis via Qwen/Qwen3-VL-30B-A3B-Instruct on HuggingFace.
 - Code/repo understanding via `agent-code` (the `claw` CLI) running in safe read-only mode.
 - A short markdown action plan or report as the final output.
 
@@ -25,7 +25,7 @@ ogma-optron takes a screenshot or image, extracts visual intent (error screen, r
 |---|---|
 | Backend | FastAPI + SQLite |
 | Frontend | Vite + React |
-| Vision model | `Qwen/Qwen3-VL-8B-Instruct` via [HF Inference Providers](https://huggingface.co/docs/inference-providers) |
+| Vision model | `Qwen/Qwen3-VL-30B-A3B-Instruct` via [HF Inference Providers](https://huggingface.co/docs/inference-providers) |
 | Code agent | `agent-code` CLI (the upstream binary for `claw-code`) in read-only mode |
 | OCR | RapidOCR (CPU, planned for week 2) |
 

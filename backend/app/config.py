@@ -17,14 +17,14 @@ class Settings(BaseSettings):
     )
 
     hf_token: str = ""
-    vision_model: str = "Qwen/Qwen3-VL-8B-Instruct"
+    vision_model: str = "Qwen/Qwen3-VL-30B-A3B-Instruct"
     openai_base_url: str = "https://router.huggingface.co/v1"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
     agent_code_bin: str = ""
     agent_code_api_base_url: str = "https://router.huggingface.co/v1"
     agent_code_api_key: str = ""
-    agent_code_model: str = "Qwen/Qwen3-VL-8B-Instruct"
+    agent_code_model: str = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 
 
 settings = Settings()
