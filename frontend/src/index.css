@@ -1,0 +1,21 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #fafafa;
+  color: #111;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1 {
+  margin-top: 0;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  font-size: 0.9rem;
+}
