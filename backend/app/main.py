@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import agents as agents_api
 from app.api import analyze as analyze_api
 from app.api import intent as intent_api
 from app.api import reports as reports_api
@@ -35,6 +36,7 @@ app.include_router(analyze_api.router)
 app.include_router(intent_api.router)
 app.include_router(task_graph_api.router)
 app.include_router(reports_api.router)
+app.include_router(agents_api.router)
 
 
 def _health_payload() -> dict:

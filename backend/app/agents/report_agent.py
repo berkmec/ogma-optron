@@ -8,10 +8,11 @@ calls. Week 4 will expand this with sibling agents.
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from openai import OpenAI
 
+from app.agents.base import AgentBase, AgentContext, AgentResult
 from app.config import settings
 from app.schemas.intent import IntentKind, IntentResult
 from app.schemas.observation import VisualObservation
@@ -94,7 +95,20 @@ def _build_user_message(
     )
 
 
-class ReportAgent:
+def _format_upstream(context: AgentContext) -> str:
+    if not context.upstream_results:
+        return ""
+    lines = ["Upstream agent findings:"]
+    for task_id, summary in context.upstream_results.items():
+        node = next((n for n in context.graph.nodes if n.task_id == task_id), None)
+        label = node.task_type if node else task_id[:8]
+        lines.append(f"  [{label}]\n    {summary.strip()}")
+    return "\n".join(lines) + "\n\n"
+
+
+class ReportAgent(AgentBase):
+    name: ClassVar[str] = "ReportAgent"
+
     def __init__(self) -> None:
         if not settings.hf_token:
             raise RuntimeError(
@@ -133,3 +147,30 @@ class ReportAgent:
             "model_used": self._model,
             "latency_ms": elapsed_ms,
         }
+
+    def run(self, context: AgentContext) -> AgentResult:
+        upstream_block = _format_upstream(context)
+        base_message = _build_user_message(
+            context.observation, context.intent, context.graph
+        )
+        user_message = upstream_block + base_message
+        start = time.perf_counter()
+        response = self._client.chat.completions.create(
+            model=self._model,
+            max_tokens=900,
+            messages=[
+                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        markdown = (response.choices[0].message.content or "").strip()
+        title = _INTENT_TITLES.get(
+            context.intent.primary_intent, _INTENT_TITLES[IntentKind.UNKNOWN]
+        )
+        return AgentResult(
+            output_summary=f"Drafted report: {title}",
+            detail_markdown=markdown,
+            model_used=self._model,
+            latency_ms=elapsed_ms,
+        )

@@ -1,3 +1,4 @@
+from app.schemas.agent import AgentRun, AgentRunStatus, AgentTrace
 from app.schemas.asset import VisualAsset
 from app.schemas.intent import IntentKind, IntentResult
 from app.schemas.observation import ImageType, VisualObservation
@@ -14,4 +15,7 @@ __all__ = [
     "TaskNode",
     "TaskStatus",
     "Report",
+    "AgentRun",
+    "AgentTrace",
+    "AgentRunStatus",
 ]

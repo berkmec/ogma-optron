@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from app.config import REPO_ROOT
+from app.schemas.agent import AgentRun
 from app.schemas.asset import VisualAsset
 from app.schemas.intent import IntentResult
 from app.schemas.observation import VisualObservation
@@ -64,6 +65,18 @@ CREATE TABLE IF NOT EXISTS reports (
     FOREIGN KEY (graph_id) REFERENCES task_graphs(graph_id)
 );
 CREATE INDEX IF NOT EXISTS idx_reports_graph ON reports(graph_id);
+CREATE TABLE IF NOT EXISTS agent_runs (
+    run_id         TEXT PRIMARY KEY,
+    graph_id       TEXT NOT NULL,
+    intent_id      TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    asset_id       TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    data           TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    FOREIGN KEY (graph_id) REFERENCES task_graphs(graph_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_graph ON agent_runs(graph_id);
 """
 
 
@@ -204,3 +217,30 @@ def get_report(report_id: str) -> Report | None:
             "SELECT data FROM reports WHERE report_id = ?", (report_id,)
         ).fetchone()
     return Report.model_validate_json(row["data"]) if row else None
+
+
+def save_agent_run(run: AgentRun) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO agent_runs"
+            "(run_id, graph_id, intent_id, observation_id, asset_id, status, data, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run.run_id,
+                run.graph_id,
+                run.intent_id,
+                run.observation_id,
+                run.asset_id,
+                run.status.value,
+                run.model_dump_json(),
+                run.created_at.isoformat(),
+            ),
+        )
+
+
+def get_agent_run(run_id: str) -> AgentRun | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT data FROM agent_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+    return AgentRun.model_validate_json(row["data"]) if row else None

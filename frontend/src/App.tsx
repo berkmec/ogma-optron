@@ -54,18 +54,33 @@ type TaskGraph = {
   nodes: TaskNode[];
 };
 
-type Report = {
-  report_id: string;
-  title: string;
-  markdown: string;
+type AgentTrace = {
+  task_id: string;
+  task_type: string;
+  agent_name: string;
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  output_summary: string;
+  detail_markdown: string;
+  warnings: string[];
   model_used: string;
   latency_ms: number;
+  error: string;
 };
 
-type StepName = "upload" | "analyze" | "intent" | "graph" | "report";
+type AgentRun = {
+  run_id: string;
+  graph_id: string;
+  status: "pending" | "running" | "done" | "failed" | "partial";
+  traces: AgentTrace[];
+  total_latency_ms: number;
+  failed_count: number;
+  skipped_count: number;
+};
+
+type StepName = "upload" | "analyze" | "intent" | "graph" | "agents";
 type Step = { name: StepName; status: "pending" | "running" | "done" | "failed"; ms?: number };
 
-const STEPS: StepName[] = ["upload", "analyze", "intent", "graph", "report"];
+const STEPS: StepName[] = ["upload", "analyze", "intent", "graph", "agents"];
 
 const INTENT_COLORS: Record<string, string> = {
   error_debug: "#c0392b",
@@ -74,17 +89,24 @@ const INTENT_COLORS: Record<string, string> = {
   unknown: "#6b7280",
 };
 
+const TRACE_COLORS: Record<AgentTrace["status"], string> = {
+  pending: "#9ca3af",
+  running: "#3b82f6",
+  done: "#16a34a",
+  failed: "#dc2626",
+  skipped: "#a16207",
+};
+
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [userPrompt, setUserPrompt] = useState("");
   const [steps, setSteps] = useState<Step[]>(STEPS.map((n) => ({ name: n, status: "pending" })));
-  const [asset, setAsset] = useState<VisualAsset | null>(null);
   const [observation, setObservation] = useState<VisualObservation | null>(null);
   const [intent, setIntent] = useState<IntentResult | null>(null);
   const [graph, setGraph] = useState<TaskGraph | null>(null);
-  const [report, setReport] = useState<Report | null>(null);
+  const [run, setRun] = useState<AgentRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -106,11 +128,10 @@ export default function App() {
   }
 
   function resetPipeline() {
-    setAsset(null);
     setObservation(null);
     setIntent(null);
     setGraph(null);
-    setReport(null);
+    setRun(null);
     setError(null);
     setSteps(STEPS.map((n) => ({ name: n, status: "pending" })));
   }
@@ -144,7 +165,6 @@ export default function App() {
         if (!r.ok) throw new Error(`upload HTTP ${r.status}: ${await r.text()}`);
         return (await r.json()) as VisualAsset;
       });
-      setAsset(uploaded);
 
       const obs = await runStep("analyze", async () => {
         const r = await fetch("/api/vision/analyze", {
@@ -179,22 +199,24 @@ export default function App() {
       });
       setGraph(tg);
 
-      const rep = await runStep("report", async () => {
-        const r = await fetch("/api/reports/generate", {
+      const agentRun = await runStep("agents", async () => {
+        const r = await fetch("/api/agents/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ graph_id: tg.graph_id }),
         });
-        if (!r.ok) throw new Error(`report HTTP ${r.status}: ${await r.text()}`);
-        return (await r.json()) as Report;
+        if (!r.ok) throw new Error(`agents HTTP ${r.status}: ${await r.text()}`);
+        return (await r.json()) as AgentRun;
       });
-      setReport(rep);
+      setRun(agentRun);
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
   }
+
+  const reportTrace = run?.traces.find((t) => t.task_type === "draft_report");
 
   return (
     <main
@@ -207,7 +229,7 @@ export default function App() {
     >
       <h1>ogma-optron</h1>
       <p style={{ color: "#666" }}>
-        Visual task understanding + agent routing runtime · Week 3 prototype
+        Visual task understanding + agent runtime · Week 4 prototype
       </p>
 
       <section style={{ marginTop: "2rem" }}>
@@ -218,7 +240,7 @@ export default function App() {
           onChange={onFileChange}
         />
         <textarea
-          placeholder="Optional: tell me what you want from this image (e.g. 'help me debug this error')"
+          placeholder="Optional: tell me what you want from this image"
           value={userPrompt}
           onChange={(e) => setUserPrompt(e.target.value)}
           rows={3}
@@ -299,11 +321,66 @@ export default function App() {
         </section>
       )}
 
-      {report && (
+      {run && (
         <section style={{ marginTop: "1.5rem" }}>
-          <h2>5. {report.title}</h2>
-          <small style={{ color: "#888" }}>
-            {report.model_used} · {report.latency_ms} ms
+          <h2>5. Agent run</h2>
+          <small style={{ color: "#666" }}>
+            run {run.run_id.slice(0, 8)}… · status {run.status} · total {run.total_latency_ms} ms
+            {run.failed_count > 0 && <> · {run.failed_count} failed</>}
+            {run.skipped_count > 0 && <> · {run.skipped_count} skipped</>}
+          </small>
+          <ol style={{ marginTop: "0.5rem", paddingLeft: "1.5rem" }}>
+            {run.traces.map((t) => (
+              <li key={t.task_id} style={{ marginBottom: "0.75rem" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 56,
+                      textAlign: "center",
+                      padding: "0.1rem 0.4rem",
+                      borderRadius: 4,
+                      background: TRACE_COLORS[t.status],
+                      color: "white",
+                      fontSize: "0.75rem",
+                      fontFamily: "ui-monospace, monospace",
+                    }}
+                  >
+                    {t.status}
+                  </span>
+                  <code>{t.task_type}</code>
+                  <span style={{ color: "#666" }}>→ {t.agent_name}</span>
+                  <span style={{ marginLeft: "auto", color: "#888", fontSize: "0.85rem" }}>
+                    {t.latency_ms} ms
+                  </span>
+                </div>
+                {t.error && (
+                  <pre style={{ color: "#a04", marginTop: "0.25rem", whiteSpace: "pre-wrap" }}>{t.error}</pre>
+                )}
+                {t.warnings.length > 0 && (
+                  <div style={{ color: "#a04", fontSize: "0.85rem", marginTop: "0.25rem" }}>
+                    {t.warnings.join("; ")}
+                  </div>
+                )}
+                {t.output_summary && !t.error && t.task_type !== "draft_report" && (
+                  <details style={{ marginTop: "0.25rem" }}>
+                    <summary style={{ cursor: "pointer", color: "#555", fontSize: "0.85rem" }}>output</summary>
+                    <div style={{ background: "#f4f4f4", padding: "0.5rem", borderRadius: 4, marginTop: "0.25rem", fontSize: "0.85rem", whiteSpace: "pre-wrap" }}>
+                      {t.output_summary}
+                    </div>
+                  </details>
+                )}
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {reportTrace && reportTrace.detail_markdown && (
+        <section style={{ marginTop: "1.5rem" }}>
+          <h2>6. Report</h2>
+          <small style={{ color: "#666" }}>
+            {reportTrace.model_used} · {reportTrace.latency_ms} ms
           </small>
           <div
             style={{
@@ -313,7 +390,7 @@ export default function App() {
               marginTop: "0.5rem",
             }}
           >
-            <ReactMarkdown>{report.markdown}</ReactMarkdown>
+            <ReactMarkdown>{reportTrace.detail_markdown}</ReactMarkdown>
           </div>
         </section>
       )}
