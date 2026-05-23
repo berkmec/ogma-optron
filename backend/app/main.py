@@ -6,6 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import analyze as analyze_api
+from app.api import intent as intent_api
+from app.api import reports as reports_api
+from app.api import task_graph as task_graph_api
 from app.api import upload as upload_api
 from app.config import settings
 from app.services.sqlite_store import init_db
@@ -29,10 +32,12 @@ app.add_middleware(
 
 app.include_router(upload_api.router)
 app.include_router(analyze_api.router)
+app.include_router(intent_api.router)
+app.include_router(task_graph_api.router)
+app.include_router(reports_api.router)
 
 
-@app.get("/health")
-def health() -> dict:
+def _health_payload() -> dict:
     return {
         "status": "ok",
         "vision_model": settings.vision_model,
@@ -41,3 +46,13 @@ def health() -> dict:
         "agent_code_bin_set": bool(settings.agent_code_bin),
         "agent_code_model": settings.agent_code_model,
     }
+
+
+@app.get("/health")
+def health() -> dict:
+    return _health_payload()
+
+
+@app.get("/api/health")
+def api_health() -> dict:
+    return _health_payload()

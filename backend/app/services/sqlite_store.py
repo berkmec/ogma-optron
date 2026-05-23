@@ -12,7 +12,10 @@ from typing import Iterator
 
 from app.config import REPO_ROOT
 from app.schemas.asset import VisualAsset
+from app.schemas.intent import IntentResult
 from app.schemas.observation import VisualObservation
+from app.schemas.report import Report
+from app.schemas.task_graph import TaskGraph
 
 DB_PATH = REPO_ROOT / "sessions.db"
 
@@ -30,6 +33,37 @@ CREATE TABLE IF NOT EXISTS observations (
     FOREIGN KEY (asset_id) REFERENCES assets(asset_id)
 );
 CREATE INDEX IF NOT EXISTS idx_observations_asset ON observations(asset_id);
+CREATE TABLE IF NOT EXISTS intents (
+    intent_id      TEXT PRIMARY KEY,
+    observation_id TEXT NOT NULL,
+    asset_id       TEXT NOT NULL,
+    data           TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    FOREIGN KEY (observation_id) REFERENCES observations(observation_id),
+    FOREIGN KEY (asset_id) REFERENCES assets(asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_intents_observation ON intents(observation_id);
+CREATE TABLE IF NOT EXISTS task_graphs (
+    graph_id       TEXT PRIMARY KEY,
+    intent_id      TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    asset_id       TEXT NOT NULL,
+    data           TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    FOREIGN KEY (intent_id) REFERENCES intents(intent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_graphs_intent ON task_graphs(intent_id);
+CREATE TABLE IF NOT EXISTS reports (
+    report_id      TEXT PRIMARY KEY,
+    graph_id       TEXT NOT NULL,
+    intent_id      TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    asset_id       TEXT NOT NULL,
+    data           TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    FOREIGN KEY (graph_id) REFERENCES task_graphs(graph_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reports_graph ON reports(graph_id);
 """
 
 
@@ -96,3 +130,77 @@ def list_observations_for_asset(asset_id: str) -> list[VisualObservation]:
             (asset_id,),
         ).fetchall()
     return [VisualObservation.model_validate_json(r["data"]) for r in rows]
+
+
+def save_intent(intent: IntentResult) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO intents(intent_id, observation_id, asset_id, data, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                intent.intent_id,
+                intent.observation_id,
+                intent.asset_id,
+                intent.model_dump_json(),
+                intent.created_at.isoformat(),
+            ),
+        )
+
+
+def get_intent(intent_id: str) -> IntentResult | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT data FROM intents WHERE intent_id = ?", (intent_id,)
+        ).fetchone()
+    return IntentResult.model_validate_json(row["data"]) if row else None
+
+
+def save_task_graph(graph: TaskGraph) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO task_graphs"
+            "(graph_id, intent_id, observation_id, asset_id, data, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                graph.graph_id,
+                graph.intent_id,
+                graph.observation_id,
+                graph.asset_id,
+                graph.model_dump_json(),
+                graph.created_at.isoformat(),
+            ),
+        )
+
+
+def get_task_graph(graph_id: str) -> TaskGraph | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT data FROM task_graphs WHERE graph_id = ?", (graph_id,)
+        ).fetchone()
+    return TaskGraph.model_validate_json(row["data"]) if row else None
+
+
+def save_report(report: Report) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO reports"
+            "(report_id, graph_id, intent_id, observation_id, asset_id, data, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                report.report_id,
+                report.graph_id,
+                report.intent_id,
+                report.observation_id,
+                report.asset_id,
+                report.model_dump_json(),
+                report.created_at.isoformat(),
+            ),
+        )
+
+
+def get_report(report_id: str) -> Report | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT data FROM reports WHERE report_id = ?", (report_id,)
+        ).fetchone()
+    return Report.model_validate_json(row["data"]) if row else None
