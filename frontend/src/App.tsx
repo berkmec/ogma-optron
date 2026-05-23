@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Health = {
   status: string;
@@ -16,6 +17,7 @@ type VisualAsset = {
   width: number;
   height: number;
   size_bytes: number;
+  created_at: string;
 };
 
 type VisualObservation = {
@@ -77,6 +79,22 @@ type AgentRun = {
   skipped_count: number;
 };
 
+type ChatMessage = {
+  message_id: string;
+  observation_id: string;
+  role: "user" | "assistant";
+  content: string;
+  model_used: string;
+  latency_ms: number;
+  created_at: string;
+};
+
+type SessionSummary = {
+  asset: VisualAsset;
+  observation: VisualObservation | null;
+  latest_report: { title: string; markdown: string } | null;
+};
+
 type StepName = "upload" | "analyze" | "intent" | "graph" | "agents";
 type Step = { name: StepName; status: "pending" | "running" | "done" | "failed"; ms?: number };
 
@@ -111,6 +129,12 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+
   useEffect(() => {
     fetch("/api/health")
       .then((r) => {
@@ -119,7 +143,15 @@ export default function App() {
       })
       .then(setHealth)
       .catch((e) => setError(String(e)));
+    refreshSessions();
   }, []);
+
+  function refreshSessions() {
+    fetch("/api/sessions?limit=10")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setSessions(data as SessionSummary[]))
+      .catch(() => {});
+  }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] || null;
@@ -133,6 +165,8 @@ export default function App() {
     setIntent(null);
     setGraph(null);
     setRun(null);
+    setChat([]);
+    setChatInput("");
     setError(null);
     setSteps(STEPS.map((n) => ({ name: n, status: "pending" })));
   }
@@ -213,10 +247,32 @@ export default function App() {
         return (await r.json()) as AgentRun;
       });
       setRun(agentRun);
+      refreshSessions();
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function sendChat() {
+    if (!observation || !chatInput.trim()) return;
+    setChatBusy(true);
+    const question = chatInput.trim();
+    setChatInput("");
+    try {
+      const r = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ observation_id: observation.observation_id, question }),
+      });
+      if (!r.ok) throw new Error(`chat HTTP ${r.status}: ${await r.text()}`);
+      const data = (await r.json()) as { user_message: ChatMessage; assistant_message: ChatMessage };
+      setChat((prev) => [...prev, data.user_message, data.assistant_message]);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setChatBusy(false);
     }
   }
 
@@ -233,8 +289,24 @@ export default function App() {
     >
       <h1>ogma-optron</h1>
       <p style={{ color: "#666" }}>
-        Visual task understanding + agent runtime · Week 4 prototype
+        Visual task understanding + agent runtime · Week 6 prototype
       </p>
+
+      <details style={{ marginTop: "1rem" }}>
+        <summary style={{ cursor: "pointer", color: "#555" }}>
+          Recent sessions ({sessions.length})
+        </summary>
+        <ul style={{ listStyle: "none", padding: 0, marginTop: "0.5rem", fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
+          {sessions.map((s) => (
+            <li key={s.asset.asset_id} style={{ padding: "0.25rem 0", borderBottom: "1px solid #eee" }}>
+              <code>{s.asset.asset_id.slice(0, 8)}</code> · {s.asset.filename} ·{" "}
+              {s.observation ? s.observation.image_type : "(no obs)"} ·{" "}
+              {s.latest_report ? s.latest_report.title : "(no report)"}
+            </li>
+          ))}
+          {sessions.length === 0 && <li style={{ color: "#aaa" }}>(no sessions yet)</li>}
+        </ul>
+      </details>
 
       <section style={{ marginTop: "2rem" }}>
         <h2>1. Pick a screenshot, describe what you want</h2>
@@ -252,7 +324,7 @@ export default function App() {
         />
         <input
           type="text"
-          placeholder="Optional workspace path (only used if intent=repo_review). e.g. C:\Users\pc\Desktop\ogma-optron"
+          placeholder="Optional workspace path (only used if intent=repo_review)"
           value={workspacePath}
           onChange={(e) => setWorkspacePath(e.target.value)}
           style={{ display: "block", width: "100%", marginTop: "0.5rem", padding: "0.5rem", fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}
@@ -310,7 +382,9 @@ export default function App() {
           >
             {intent.primary_intent}
           </span>
-          <span style={{ marginLeft: "0.75rem", color: "#666" }}>confidence {intent.confidence.toFixed(2)}</span>
+          <span style={{ marginLeft: "0.75rem", color: "#666" }}>
+            confidence {intent.confidence.toFixed(2)}
+          </span>
           <p style={{ marginTop: "0.5rem", color: "#333" }}>{intent.reasoning}</p>
           {intent.ambiguity.length > 0 && (
             <p style={{ color: "#a04" }}>Ambiguity: {intent.ambiguity.join("; ")}</p>
@@ -401,7 +475,61 @@ export default function App() {
               marginTop: "0.5rem",
             }}
           >
-            <ReactMarkdown>{reportTrace.detail_markdown}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {reportTrace.detail_markdown}
+            </ReactMarkdown>
+          </div>
+        </section>
+      )}
+
+      {observation && (
+        <section style={{ marginTop: "1.5rem" }}>
+          <h2>7. Follow-up chat</h2>
+          <small style={{ color: "#666" }}>
+            Anchored to observation {observation.observation_id.slice(0, 8)}…
+          </small>
+          <div style={{ marginTop: "0.75rem" }}>
+            {chat.length === 0 && (
+              <div style={{ color: "#888", fontSize: "0.9rem" }}>
+                Ask a follow-up question about this screenshot or the report above.
+              </div>
+            )}
+            {chat.map((m) => (
+              <div
+                key={m.message_id}
+                style={{
+                  marginBottom: "0.75rem",
+                  padding: "0.6rem 0.9rem",
+                  borderRadius: 8,
+                  background: m.role === "user" ? "#e0e7ff" : "#f4f4f4",
+                  border: m.role === "user" ? "1px solid #c7d2fe" : "1px solid #e5e5e5",
+                }}
+              >
+                <div style={{ fontSize: "0.75rem", color: "#666", marginBottom: "0.25rem" }}>
+                  {m.role === "user" ? "you" : "assistant"}
+                  {m.role === "assistant" && (
+                    <span style={{ marginLeft: "0.5rem" }}>· {m.latency_ms} ms</span>
+                  )}
+                </div>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+            <input
+              type="text"
+              placeholder="Ask a follow-up question…"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !chatBusy) sendChat();
+              }}
+              disabled={chatBusy}
+              style={{ flex: 1, padding: "0.5rem", fontFamily: "inherit" }}
+            />
+            <button onClick={sendChat} disabled={chatBusy || !chatInput.trim()}>
+              {chatBusy ? "..." : "Send"}
+            </button>
           </div>
         </section>
       )}

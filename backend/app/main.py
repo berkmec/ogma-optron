@@ -7,9 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import agents as agents_api
 from app.api import analyze as analyze_api
+from app.api import chat as chat_api
 from app.api import clawbridge as clawbridge_api
 from app.api import intent as intent_api
 from app.api import reports as reports_api
+from app.api import sessions as sessions_api
 from app.api import task_graph as task_graph_api
 from app.api import upload as upload_api
 from app.config import settings
@@ -39,6 +41,8 @@ app.include_router(task_graph_api.router)
 app.include_router(reports_api.router)
 app.include_router(agents_api.router)
 app.include_router(clawbridge_api.router)
+app.include_router(chat_api.router)
+app.include_router(sessions_api.router)
 
 
 def _health_payload() -> dict:
