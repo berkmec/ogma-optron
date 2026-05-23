@@ -75,9 +75,11 @@ def _validate_workspace(raw: str) -> Path:
             continue
         try:
             p.relative_to(b)
-            raise ValueError(f"Blocked system directory: {p}")
         except ValueError:
+            # p is NOT under this blocked root; move on.
             continue
+        # p IS under a blocked root; refuse.
+        raise ValueError(f"Blocked system directory: {p}")
     return p
 
 

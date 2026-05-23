@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, File, UploadFile
 
 from app.schemas.asset import VisualAsset
@@ -9,7 +11,7 @@ router = APIRouter(prefix="/api/assets", tags=["assets"])
 
 
 @router.post("/upload", response_model=VisualAsset)
-async def upload_asset(file: UploadFile = File(...)) -> VisualAsset:
+async def upload_asset(file: Annotated[UploadFile, File()]) -> VisualAsset:
     asset = await file_store.save_upload(file)
     sqlite_store.save_asset(asset)
     return asset

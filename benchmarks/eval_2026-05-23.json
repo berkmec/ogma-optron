@@ -1,0 +1,211 @@
+{
+  "summary": {
+    "n_cases": 10,
+    "image_type_correct": 9,
+    "image_type_accuracy": 0.9,
+    "intent_correct": 9,
+    "intent_accuracy": 0.9,
+    "errored": 0,
+    "per_step": [
+      {
+        "step": "upload",
+        "n": 10,
+        "p50_ms": 8.0,
+        "p95_ms": 20.2,
+        "p99_ms": 25.7,
+        "mean_ms": 9.9
+      },
+      {
+        "step": "analyze",
+        "n": 10,
+        "p50_ms": 3551.0,
+        "p95_ms": 5417.2,
+        "p99_ms": 5627.4,
+        "mean_ms": 3865.9
+      },
+      {
+        "step": "intent",
+        "n": 10,
+        "p50_ms": 1827.0,
+        "p95_ms": 5334.7,
+        "p99_ms": 5732.6,
+        "mean_ms": 2469.2
+      }
+    ],
+    "started_at": "2026-05-23T19:48:46.915394+00:00",
+    "finished_at": "2026-05-23T19:49:50.807569+00:00",
+    "wall_seconds": 63.9
+  },
+  "cases": [
+    {
+      "case_id": "err_conn_refused",
+      "expected_image_type": "error_screen",
+      "expected_intent": "error_debug",
+      "user_prompt": "What does this error mean and how do I fix it?",
+      "actual_image_type": "error_screen",
+      "actual_intent": "error_debug",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 27,
+        "analyze": 5096,
+        "intent": 1990
+      },
+      "error": null
+    },
+    {
+      "case_id": "err_null_pointer",
+      "expected_image_type": "error_screen",
+      "expected_intent": "error_debug",
+      "user_prompt": "Help me debug this exception.",
+      "actual_image_type": "error_screen",
+      "actual_intent": "error_debug",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 8,
+        "analyze": 2761,
+        "intent": 1487
+      },
+      "error": null
+    },
+    {
+      "case_id": "gh_claw_code",
+      "expected_image_type": "github_repo",
+      "expected_intent": "repo_review",
+      "user_prompt": "Give me a quick review of this repository.",
+      "actual_image_type": "github_repo",
+      "actual_intent": "repo_review",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 8,
+        "analyze": 3511,
+        "intent": 1664
+      },
+      "error": null
+    },
+    {
+      "case_id": "gh_flask",
+      "expected_image_type": "github_repo",
+      "expected_intent": "repo_review",
+      "user_prompt": "Review this repository.",
+      "actual_image_type": "github_repo",
+      "actual_intent": "repo_review",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 7,
+        "analyze": 3591,
+        "intent": 1591
+      },
+      "error": null
+    },
+    {
+      "case_id": "ui_login",
+      "expected_image_type": "ui_dashboard",
+      "expected_intent": "ui_help",
+      "user_prompt": "What is this screen and what should I do?",
+      "actual_image_type": "code_editor",
+      "actual_intent": "ui_help",
+      "intent_confidence": 0.95,
+      "image_type_ok": false,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 12,
+        "analyze": 3162,
+        "intent": 1469
+      },
+      "error": null
+    },
+    {
+      "case_id": "ui_dashboard",
+      "expected_image_type": "ui_dashboard",
+      "expected_intent": "ui_help",
+      "user_prompt": "Explain this dashboard.",
+      "actual_image_type": "ui_dashboard",
+      "actual_intent": "ui_help",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 7,
+        "analyze": 3289,
+        "intent": 4727
+      },
+      "error": null
+    },
+    {
+      "case_id": "code_python",
+      "expected_image_type": "code_editor",
+      "expected_intent": "ui_help",
+      "user_prompt": "What does this code do?",
+      "actual_image_type": "code_editor",
+      "actual_intent": "repo_review",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": false,
+      "latency_ms": {
+        "upload": 7,
+        "analyze": 4373,
+        "intent": 1657
+      },
+      "error": null
+    },
+    {
+      "case_id": "code_typescript",
+      "expected_image_type": "code_editor",
+      "expected_intent": "ui_help",
+      "user_prompt": "Walk me through this snippet.",
+      "actual_image_type": "code_editor",
+      "actual_intent": "ui_help",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 7,
+        "analyze": 5680,
+        "intent": 2108
+      },
+      "error": null
+    },
+    {
+      "case_id": "doc_paper",
+      "expected_image_type": "document_page",
+      "expected_intent": "ui_help",
+      "user_prompt": "Summarize this page.",
+      "actual_image_type": "document_page",
+      "actual_intent": "ui_help",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 8,
+        "analyze": 4052,
+        "intent": 5832
+      },
+      "error": null
+    },
+    {
+      "case_id": "doc_invoice",
+      "expected_image_type": "document_page",
+      "expected_intent": "ui_help",
+      "user_prompt": "What is this document?",
+      "actual_image_type": "document_page",
+      "actual_intent": "ui_help",
+      "intent_confidence": 0.95,
+      "image_type_ok": true,
+      "intent_ok": true,
+      "latency_ms": {
+        "upload": 8,
+        "analyze": 3144,
+        "intent": 2167
+      },
+      "error": null
+    }
+  ]
+}
