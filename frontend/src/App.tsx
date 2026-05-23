@@ -102,6 +102,7 @@ export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [userPrompt, setUserPrompt] = useState("");
+  const [workspacePath, setWorkspacePath] = useState("");
   const [steps, setSteps] = useState<Step[]>(STEPS.map((n) => ({ name: n, status: "pending" })));
   const [observation, setObservation] = useState<VisualObservation | null>(null);
   const [intent, setIntent] = useState<IntentResult | null>(null);
@@ -203,7 +204,10 @@ export default function App() {
         const r = await fetch("/api/agents/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ graph_id: tg.graph_id }),
+          body: JSON.stringify({
+            graph_id: tg.graph_id,
+            workspace_path: workspacePath.trim(),
+          }),
         });
         if (!r.ok) throw new Error(`agents HTTP ${r.status}: ${await r.text()}`);
         return (await r.json()) as AgentRun;
@@ -245,6 +249,13 @@ export default function App() {
           onChange={(e) => setUserPrompt(e.target.value)}
           rows={3}
           style={{ display: "block", width: "100%", marginTop: "0.75rem", padding: "0.5rem", fontFamily: "inherit" }}
+        />
+        <input
+          type="text"
+          placeholder="Optional workspace path (only used if intent=repo_review). e.g. C:\Users\pc\Desktop\ogma-optron"
+          value={workspacePath}
+          onChange={(e) => setWorkspacePath(e.target.value)}
+          style={{ display: "block", width: "100%", marginTop: "0.5rem", padding: "0.5rem", fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}
         />
         <button
           onClick={runPipeline}

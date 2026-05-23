@@ -13,6 +13,7 @@ from typing import Iterator
 from app.config import REPO_ROOT
 from app.schemas.agent import AgentRun
 from app.schemas.asset import VisualAsset
+from app.schemas.clawbridge import ClawRun
 from app.schemas.intent import IntentResult
 from app.schemas.observation import VisualObservation
 from app.schemas.report import Report
@@ -77,6 +78,14 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     FOREIGN KEY (graph_id) REFERENCES task_graphs(graph_id)
 );
 CREATE INDEX IF NOT EXISTS idx_agent_runs_graph ON agent_runs(graph_id);
+CREATE TABLE IF NOT EXISTS claw_runs (
+    run_id         TEXT PRIMARY KEY,
+    workspace_path TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    data           TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_claw_runs_status ON claw_runs(status);
 """
 
 
@@ -244,3 +253,26 @@ def get_agent_run(run_id: str) -> AgentRun | None:
             "SELECT data FROM agent_runs WHERE run_id = ?", (run_id,)
         ).fetchone()
     return AgentRun.model_validate_json(row["data"]) if row else None
+
+
+def save_claw_run(run: ClawRun) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO claw_runs"
+            "(run_id, workspace_path, status, data, created_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                run.run_id,
+                run.workspace_path,
+                run.status.value,
+                run.model_dump_json(),
+                run.started_at.isoformat(),
+            ),
+        )
+
+
+def get_claw_run(run_id: str) -> ClawRun | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT data FROM claw_runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+    return ClawRun.model_validate_json(row["data"]) if row else None

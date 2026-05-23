@@ -1,5 +1,6 @@
 from app.schemas.agent import AgentRun, AgentRunStatus, AgentTrace
 from app.schemas.asset import VisualAsset
+from app.schemas.clawbridge import ClawPermissionProfile, ClawRun, ClawRunStatus
 from app.schemas.intent import IntentKind, IntentResult
 from app.schemas.observation import ImageType, VisualObservation
 from app.schemas.report import Report
@@ -18,4 +19,7 @@ __all__ = [
     "AgentRun",
     "AgentTrace",
     "AgentRunStatus",
+    "ClawRun",
+    "ClawRunStatus",
+    "ClawPermissionProfile",
 ]

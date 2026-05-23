@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 class RunRequest(BaseModel):
     graph_id: str
+    workspace_path: str = ""
 
 
 @router.post("/run", response_model=AgentRun)
@@ -33,6 +34,7 @@ def run(req: RunRequest) -> AgentRun:
         observation=observation,
         intent=intent,
         user_prompt=intent.user_prompt,
+        workspace_path=req.workspace_path,
     )
     sqlite_store.save_agent_run(agent_run)
     return agent_run

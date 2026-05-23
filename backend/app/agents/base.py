@@ -25,6 +25,7 @@ class AgentContext(BaseModel):
     graph: TaskGraph
     upstream_results: dict[str, str] = Field(default_factory=dict)
     user_prompt: str = ""
+    workspace_path: str = ""
 
 
 class AgentResult(BaseModel):

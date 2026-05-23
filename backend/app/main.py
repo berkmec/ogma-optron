@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import agents as agents_api
 from app.api import analyze as analyze_api
+from app.api import clawbridge as clawbridge_api
 from app.api import intent as intent_api
 from app.api import reports as reports_api
 from app.api import task_graph as task_graph_api
@@ -37,6 +38,7 @@ app.include_router(intent_api.router)
 app.include_router(task_graph_api.router)
 app.include_router(reports_api.router)
 app.include_router(agents_api.router)
+app.include_router(clawbridge_api.router)
 
 
 def _health_payload() -> dict:

@@ -46,6 +46,7 @@ def execute(
     observation: VisualObservation,
     intent: IntentResult,
     user_prompt: str = "",
+    workspace_path: str = "",
 ) -> AgentRun:
     nodes_by_id = {n.task_id: n for n in graph.nodes}
     order = _topological_order(graph)
@@ -87,6 +88,7 @@ def execute(
                 if dep_id in upstream
             },
             user_prompt=user_prompt,
+            workspace_path=workspace_path,
         )
 
         try:
