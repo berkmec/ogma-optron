@@ -5,3 +5,4 @@ pillow>=10.4
 python-dotenv>=1.0
 pydantic-settings>=2.5
 python-multipart>=0.0.9
+rapidocr-onnxruntime>=1.3

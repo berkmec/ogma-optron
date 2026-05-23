@@ -2,7 +2,7 @@
 
 > Visual task understanding and agent routing runtime. Turns screenshots, images, and visual documents into structured task graphs and routes them to specialized agents. Delegates to the `agent-code` (claw) CLI in read-only mode for repository-aware code analysis.
 
-**Status:** Week 1 — skeleton. Not yet runnable end-to-end.
+**Status:** Week 2 — visual pipeline working end-to-end. Upload a screenshot → OCR + Qwen3-VL classification → VisualObservation in ~4-5s. Frontend can drive the flow.
 
 ## What this is
 
