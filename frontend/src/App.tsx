@@ -1,29 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { cn } from "@/utils/cn";
 
-type Health = {
-  status: string;
-  vision_model: string;
-  openai_base_url: string;
-  hf_token_configured: boolean;
-  agent_code_bin_set: boolean;
-  agent_code_model: string;
-};
-
-type VisualAsset = {
-  asset_id: string;
-  filename: string;
-  width: number;
-  height: number;
-  size_bytes: number;
-  created_at: string;
-};
+type ImageType = string;
 
 type VisualObservation = {
   observation_id: string;
   asset_id: string;
-  image_type: string;
+  image_type: ImageType;
   ocr_text: string;
   vision_description: string;
   confidence: number;
@@ -71,7 +56,6 @@ type AgentTrace = {
 
 type AgentRun = {
   run_id: string;
-  graph_id: string;
   status: "pending" | "running" | "done" | "failed" | "partial";
   traces: AgentTrace[];
   total_latency_ms: number;
@@ -79,500 +63,518 @@ type AgentRun = {
   skipped_count: number;
 };
 
-type ChatMessage = {
-  message_id: string;
-  observation_id: string;
-  role: "user" | "assistant";
+type Turn = {
+  id: string;
+  role: "user" | "assistant" | "error" | "system";
   content: string;
-  model_used: string;
-  latency_ms: number;
-  created_at: string;
+  image?: string;
+  pipeline?: {
+    observation: VisualObservation;
+    intent: IntentResult;
+    graph: TaskGraph;
+    run: AgentRun;
+  };
+  timestamp: Date;
 };
 
-type SessionSummary = {
-  asset: VisualAsset;
-  observation: VisualObservation | null;
-  latest_report: { title: string; markdown: string } | null;
+const SUGGESTIONS = [
+  "Bir hata ekran görüntüsü yükle",
+  "Bir GitHub repo screenshot'ı analiz et",
+  "Bir UI tasarımı incelet",
+];
+
+const STATUS_STYLES: Record<AgentTrace["status"], string> = {
+  pending:  "bg-white/5 text-gray-400",
+  running:  "bg-blue-500/20 text-blue-300",
+  done:     "bg-emerald-500/15 text-emerald-300",
+  failed:   "bg-red-500/20 text-red-300",
+  skipped:  "bg-amber-500/15 text-amber-300",
 };
 
-type StepName = "upload" | "analyze" | "intent" | "graph" | "agents";
-type Step = { name: StepName; status: "pending" | "running" | "done" | "failed"; ms?: number };
-
-const STEPS: StepName[] = ["upload", "analyze", "intent", "graph", "agents"];
-
-const INTENT_COLORS: Record<string, string> = {
-  error_debug: "#c0392b",
-  repo_review: "#2c7a7b",
-  ui_help: "#2c5282",
-  unknown: "#6b7280",
+const INTENT_BG: Record<string, string> = {
+  error_debug: "bg-red-500/15 text-red-300 border-red-500/30",
+  repo_review: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  ui_help:     "bg-sky-500/15 text-sky-300 border-sky-500/30",
+  unknown:     "bg-gray-500/15 text-gray-300 border-gray-500/30",
 };
 
-const TRACE_COLORS: Record<AgentTrace["status"], string> = {
-  pending: "#9ca3af",
-  running: "#3b82f6",
-  done: "#16a34a",
-  failed: "#dc2626",
-  skipped: "#a16207",
-};
+function uid() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function formatTime(d: Date) {
+  return d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function lastObservationId(turns: Turn[]): string | null {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const obs = turns[i].pipeline?.observation;
+    if (obs) return obs.observation_id;
+  }
+  return null;
+}
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${path} HTTP ${r.status}: ${await r.text()}`);
+  return (await r.json()) as T;
+}
 
 export default function App() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [userPrompt, setUserPrompt] = useState("");
-  const [workspacePath, setWorkspacePath] = useState("");
-  const [steps, setSteps] = useState<Step[]>(STEPS.map((n) => ({ name: n, status: "pending" })));
-  const [observation, setObservation] = useState<VisualObservation | null>(null);
-  const [intent, setIntent] = useState<IntentResult | null>(null);
-  const [graph, setGraph] = useState<TaskGraph | null>(null);
-  const [run, setRun] = useState<AgentRun | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const [chat, setChat] = useState<ChatMessage[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatBusy, setChatBusy] = useState(false);
-
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [input, setInput] = useState("");
+  const [selected, setSelected] = useState<{ dataUrl: string; file: File } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/health")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(setHealth)
-      .catch((e) => setError(String(e)));
-    refreshSessions();
-  }, []);
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [turns, isLoading]);
 
-  function refreshSessions() {
-    fetch("/api/sessions?limit=10")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setSessions(data as SessionSummary[]))
-      .catch(() => {});
+  function pickFile(file: File) {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setSelected({ dataUrl: reader.result as string, file });
+    };
+    reader.readAsDataURL(file);
   }
 
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] || null;
-    setFile(f);
-    resetPipeline();
-    setPreview(f ? URL.createObjectURL(f) : null);
+  function clearSelected() {
+    setSelected(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  function resetPipeline() {
-    setObservation(null);
-    setIntent(null);
-    setGraph(null);
-    setRun(null);
-    setChat([]);
-    setChatInput("");
-    setError(null);
-    setSteps(STEPS.map((n) => ({ name: n, status: "pending" })));
+  function pushTurn(t: Omit<Turn, "id" | "timestamp"> & { id?: string }) {
+    setTurns((prev) => [
+      ...prev,
+      { id: t.id ?? uid(), timestamp: new Date(), ...t } as Turn,
+    ]);
   }
 
-  function patchStep(name: StepName, patch: Partial<Step>) {
-    setSteps((prev) => prev.map((s) => (s.name === name ? { ...s, ...patch } : s)));
-  }
-
-  async function runStep<T>(name: StepName, fn: () => Promise<T>): Promise<T> {
-    patchStep(name, { status: "running" });
-    const t0 = performance.now();
+  async function runVisionTurn(file: File, dataUrl: string, prompt: string) {
+    pushTurn({ role: "user", content: prompt, image: dataUrl });
+    setIsLoading(true);
     try {
-      const result = await fn();
-      patchStep(name, { status: "done", ms: Math.round(performance.now() - t0) });
-      return result;
+      setLoadingStep("Görsel yükleniyor…");
+      const fd = new FormData();
+      fd.append("file", file);
+      const upR = await fetch("/api/assets/upload", { method: "POST", body: fd });
+      if (!upR.ok) throw new Error(`upload HTTP ${upR.status}: ${await upR.text()}`);
+      const asset = (await upR.json()) as { asset_id: string };
+
+      setLoadingStep("Görsel analiz ediliyor…");
+      const observation = await postJson<VisualObservation>("/api/vision/analyze", {
+        asset_id: asset.asset_id,
+      });
+
+      setLoadingStep("Niyet çıkarılıyor…");
+      const intent = await postJson<IntentResult>("/api/intent/classify", {
+        observation_id: observation.observation_id,
+        user_prompt: prompt,
+      });
+
+      setLoadingStep("Görev planı hazırlanıyor…");
+      const graph = await postJson<TaskGraph>("/api/task-graph/build", {
+        intent_id: intent.intent_id,
+      });
+
+      setLoadingStep("Agent'lar çalışıyor…");
+      const run = await postJson<AgentRun>("/api/agents/run", {
+        graph_id: graph.graph_id,
+      });
+
+      const reportTrace = run.traces.find((t) => t.task_type === "draft_report");
+      const content = reportTrace?.detail_markdown?.trim() || "_(rapor üretilemedi)_";
+      pushTurn({
+        role: "assistant",
+        content,
+        pipeline: { observation, intent, graph, run },
+      });
     } catch (e) {
-      patchStep(name, { status: "failed", ms: Math.round(performance.now() - t0) });
-      throw e;
-    }
-  }
-
-  async function runPipeline() {
-    if (!file) return;
-    setBusy(true);
-    resetPipeline();
-    try {
-      const uploaded = await runStep("upload", async () => {
-        const fd = new FormData();
-        fd.append("file", file);
-        const r = await fetch("/api/assets/upload", { method: "POST", body: fd });
-        if (!r.ok) throw new Error(`upload HTTP ${r.status}: ${await r.text()}`);
-        return (await r.json()) as VisualAsset;
-      });
-
-      const obs = await runStep("analyze", async () => {
-        const r = await fetch("/api/vision/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ asset_id: uploaded.asset_id }),
-        });
-        if (!r.ok) throw new Error(`analyze HTTP ${r.status}: ${await r.text()}`);
-        return (await r.json()) as VisualObservation;
-      });
-      setObservation(obs);
-
-      const intentRes = await runStep("intent", async () => {
-        const r = await fetch("/api/intent/classify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ observation_id: obs.observation_id, user_prompt: userPrompt }),
-        });
-        if (!r.ok) throw new Error(`intent HTTP ${r.status}: ${await r.text()}`);
-        return (await r.json()) as IntentResult;
-      });
-      setIntent(intentRes);
-
-      const tg = await runStep("graph", async () => {
-        const r = await fetch("/api/task-graph/build", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ intent_id: intentRes.intent_id }),
-        });
-        if (!r.ok) throw new Error(`graph HTTP ${r.status}: ${await r.text()}`);
-        return (await r.json()) as TaskGraph;
-      });
-      setGraph(tg);
-
-      const agentRun = await runStep("agents", async () => {
-        const r = await fetch("/api/agents/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            graph_id: tg.graph_id,
-            workspace_path: workspacePath.trim(),
-          }),
-        });
-        if (!r.ok) throw new Error(`agents HTTP ${r.status}: ${await r.text()}`);
-        return (await r.json()) as AgentRun;
-      });
-      setRun(agentRun);
-      refreshSessions();
-    } catch (e) {
-      setError(String(e));
+      pushTurn({ role: "error", content: String(e) });
     } finally {
-      setBusy(false);
+      setIsLoading(false);
+      setLoadingStep("");
     }
   }
 
-  async function sendChat() {
-    if (!observation || !chatInput.trim()) return;
-    setChatBusy(true);
-    const question = chatInput.trim();
-    setChatInput("");
+  async function runChatTurn(question: string, observationId: string) {
+    pushTurn({ role: "user", content: question });
+    setIsLoading(true);
+    setLoadingStep("Düşünüyor…");
     try {
-      const r = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ observation_id: observation.observation_id, question }),
+      const data = await postJson<{
+        user_message: { message_id: string };
+        assistant_message: { message_id: string; content: string };
+      }>("/api/chat", {
+        observation_id: observationId,
+        question,
       });
-      if (!r.ok) throw new Error(`chat HTTP ${r.status}: ${await r.text()}`);
-      const data = (await r.json()) as { user_message: ChatMessage; assistant_message: ChatMessage };
-      setChat((prev) => [...prev, data.user_message, data.assistant_message]);
+      pushTurn({
+        id: data.assistant_message.message_id,
+        role: "assistant",
+        content: data.assistant_message.content,
+      });
     } catch (e) {
-      setError(String(e));
+      pushTurn({ role: "error", content: String(e) });
     } finally {
-      setChatBusy(false);
+      setIsLoading(false);
+      setLoadingStep("");
     }
   }
 
-  const reportTrace = run?.traces.find((t) => t.task_type === "draft_report");
+  async function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (isLoading) return;
+    const text = input.trim();
+    if (!selected && !text) return;
+    setInput("");
+
+    if (selected) {
+      const sel = selected;
+      setSelected(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      await runVisionTurn(sel.file, sel.dataUrl, text);
+      return;
+    }
+    const obsId = lastObservationId(turns);
+    if (!obsId) {
+      pushTurn({
+        role: "system",
+        content:
+          "Önce bir görsel yükleyin — takip soruları yüklediğiniz görselin context'ine bağlanır.",
+      });
+      return;
+    }
+    await runChatTurn(text, obsId);
+  }
 
   return (
-    <main
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        padding: "2rem",
-        maxWidth: 980,
-        margin: "0 auto",
-      }}
-    >
-      <h1>ogma-optron</h1>
-      <p style={{ color: "#666" }}>
-        Visual task understanding + agent runtime · Week 6 prototype
-      </p>
-
-      <details style={{ marginTop: "1rem" }}>
-        <summary style={{ cursor: "pointer", color: "#555" }}>
-          Recent sessions ({sessions.length})
-        </summary>
-        <ul style={{ listStyle: "none", padding: 0, marginTop: "0.5rem", fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}>
-          {sessions.map((s) => (
-            <li key={s.asset.asset_id} style={{ padding: "0.25rem 0", borderBottom: "1px solid #eee" }}>
-              <code>{s.asset.asset_id.slice(0, 8)}</code> · {s.asset.filename} ·{" "}
-              {s.observation ? s.observation.image_type : "(no obs)"} ·{" "}
-              {s.latest_report ? s.latest_report.title : "(no report)"}
-            </li>
-          ))}
-          {sessions.length === 0 && <li style={{ color: "#aaa" }}>(no sessions yet)</li>}
-        </ul>
-      </details>
-
-      <section style={{ marginTop: "2rem" }}>
-        <h2>1. Pick a screenshot, describe what you want</h2>
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
-          onChange={onFileChange}
-        />
-        <textarea
-          placeholder="Optional: tell me what you want from this image"
-          value={userPrompt}
-          onChange={(e) => setUserPrompt(e.target.value)}
-          rows={3}
-          style={{ display: "block", width: "100%", marginTop: "0.75rem", padding: "0.5rem", fontFamily: "inherit" }}
-        />
-        <input
-          type="text"
-          placeholder="Optional workspace path (only used if intent=repo_review)"
-          value={workspacePath}
-          onChange={(e) => setWorkspacePath(e.target.value)}
-          style={{ display: "block", width: "100%", marginTop: "0.5rem", padding: "0.5rem", fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }}
-        />
-        <button
-          onClick={runPipeline}
-          disabled={!file || busy}
-          style={{ marginTop: "0.75rem", padding: "0.5rem 1rem", fontSize: "1rem" }}
-        >
-          {busy ? "Running pipeline..." : "Run full pipeline"}
-        </button>
-      </section>
-
-      {preview && (
-        <section style={{ marginTop: "1.5rem" }}>
-          <img
-            src={preview}
-            alt="preview"
-            style={{ maxWidth: "100%", maxHeight: 360, borderRadius: 4, border: "1px solid #ddd" }}
-          />
-        </section>
-      )}
-
-      <section style={{ marginTop: "1.5rem" }}>
-        <h2>2. Pipeline progress</h2>
-        <ul style={{ listStyle: "none", padding: 0, fontFamily: "ui-monospace, monospace" }}>
-          {steps.map((s) => (
-            <li key={s.name} style={{ display: "flex", gap: "0.75rem", padding: "0.25rem 0" }}>
-              <span style={{ width: 16 }}>{stepGlyph(s.status)}</span>
-              <span style={{ width: 80 }}>{s.name}</span>
-              <span style={{ color: "#888" }}>{s.status}</span>
-              {s.ms !== undefined && <span style={{ marginLeft: "auto", color: "#888" }}>{s.ms} ms</span>}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {error && (
-        <pre style={{ marginTop: "1.5rem", color: "crimson", whiteSpace: "pre-wrap" }}>{error}</pre>
-      )}
-
-      {intent && (
-        <section style={{ marginTop: "1.5rem" }}>
-          <h2>3. Intent</h2>
-          <span
-            style={{
-              display: "inline-block",
-              padding: "0.25rem 0.75rem",
-              borderRadius: 999,
-              background: INTENT_COLORS[intent.primary_intent] || "#6b7280",
-              color: "white",
-              fontWeight: 600,
-              fontFamily: "ui-monospace, monospace",
-            }}
-          >
-            {intent.primary_intent}
+    <div className="min-h-screen bg-black text-white flex flex-col">
+      <header className="border-b border-white/10 bg-black/95 sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+          <h1 className="text-lg font-medium tracking-wide">Ogma Optron</h1>
+          <span className="text-xs text-gray-500 hidden sm:inline">
+            Qwen3-VL · agent runtime
           </span>
-          <span style={{ marginLeft: "0.75rem", color: "#666" }}>
-            confidence {intent.confidence.toFixed(2)}
-          </span>
-          <p style={{ marginTop: "0.5rem", color: "#333" }}>{intent.reasoning}</p>
-          {intent.ambiguity.length > 0 && (
-            <p style={{ color: "#a04" }}>Ambiguity: {intent.ambiguity.join("; ")}</p>
-          )}
-        </section>
-      )}
+        </div>
+      </header>
 
-      {graph && (
-        <section style={{ marginTop: "1.5rem" }}>
-          <h2>4. Task graph</h2>
-          <ol style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.9rem" }}>
-            {graph.nodes.map((n) => (
-              <li key={n.task_id} style={{ marginBottom: "0.4rem" }}>
-                <code>{n.task_type}</code> → <span style={{ color: "#555" }}>{n.required_agent}</span>
-                <div style={{ color: "#888", fontSize: "0.85rem" }}>{n.description}</div>
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-
-      {run && (
-        <section style={{ marginTop: "1.5rem" }}>
-          <h2>5. Agent run</h2>
-          <small style={{ color: "#666" }}>
-            run {run.run_id.slice(0, 8)}… · status {run.status} · total {run.total_latency_ms} ms
-            {run.failed_count > 0 && <> · {run.failed_count} failed</>}
-            {run.skipped_count > 0 && <> · {run.skipped_count} skipped</>}
-          </small>
-          <ol style={{ marginTop: "0.5rem", paddingLeft: "1.5rem" }}>
-            {run.traces.map((t) => (
-              <li key={t.task_id} style={{ marginBottom: "0.75rem" }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: 56,
-                      textAlign: "center",
-                      padding: "0.1rem 0.4rem",
-                      borderRadius: 4,
-                      background: TRACE_COLORS[t.status],
-                      color: "white",
-                      fontSize: "0.75rem",
-                      fontFamily: "ui-monospace, monospace",
-                    }}
-                  >
-                    {t.status}
-                  </span>
-                  <code>{t.task_type}</code>
-                  <span style={{ color: "#666" }}>→ {t.agent_name}</span>
-                  <span style={{ marginLeft: "auto", color: "#888", fontSize: "0.85rem" }}>
-                    {t.latency_ms} ms
-                  </span>
-                </div>
-                {t.error && (
-                  <pre style={{ color: "#a04", marginTop: "0.25rem", whiteSpace: "pre-wrap" }}>{t.error}</pre>
-                )}
-                {t.warnings.length > 0 && (
-                  <div style={{ color: "#a04", fontSize: "0.85rem", marginTop: "0.25rem" }}>
-                    {t.warnings.join("; ")}
-                  </div>
-                )}
-                {t.output_summary && !t.error && t.task_type !== "draft_report" && (
-                  <details style={{ marginTop: "0.25rem" }}>
-                    <summary style={{ cursor: "pointer", color: "#555", fontSize: "0.85rem" }}>output</summary>
-                    <div style={{ background: "#f4f4f4", padding: "0.5rem", borderRadius: 4, marginTop: "0.25rem", fontSize: "0.85rem", whiteSpace: "pre-wrap" }}>
-                      {t.output_summary}
-                    </div>
-                  </details>
-                )}
-              </li>
-            ))}
-          </ol>
-        </section>
-      )}
-
-      {reportTrace && reportTrace.detail_markdown && (
-        <section style={{ marginTop: "1.5rem" }}>
-          <h2>6. Report</h2>
-          <small style={{ color: "#666" }}>
-            {reportTrace.model_used} · {reportTrace.latency_ms} ms
-          </small>
-          <div
-            style={{
-              background: "#f4f4f4",
-              padding: "1rem 1.5rem",
-              borderRadius: 4,
-              marginTop: "0.5rem",
-            }}
-          >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {reportTrace.detail_markdown}
-            </ReactMarkdown>
-          </div>
-        </section>
-      )}
-
-      {observation && (
-        <section style={{ marginTop: "1.5rem" }}>
-          <h2>7. Follow-up chat</h2>
-          <small style={{ color: "#666" }}>
-            Anchored to observation {observation.observation_id.slice(0, 8)}…
-          </small>
-          <div style={{ marginTop: "0.75rem" }}>
-            {chat.length === 0 && (
-              <div style={{ color: "#888", fontSize: "0.9rem" }}>
-                Ask a follow-up question about this screenshot or the report above.
-              </div>
-            )}
-            {chat.map((m) => (
-              <div
-                key={m.message_id}
-                style={{
-                  marginBottom: "0.75rem",
-                  padding: "0.6rem 0.9rem",
-                  borderRadius: 8,
-                  background: m.role === "user" ? "#e0e7ff" : "#f4f4f4",
-                  border: m.role === "user" ? "1px solid #c7d2fe" : "1px solid #e5e5e5",
-                }}
-              >
-                <div style={{ fontSize: "0.75rem", color: "#666", marginBottom: "0.25rem" }}>
-                  {m.role === "user" ? "you" : "assistant"}
-                  {m.role === "assistant" && (
-                    <span style={{ marginLeft: "0.5rem" }}>· {m.latency_ms} ms</span>
-                  )}
-                </div>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-              </div>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-            <input
-              type="text"
-              placeholder="Ask a follow-up question…"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !chatBusy) sendChat();
-              }}
-              disabled={chatBusy}
-              style={{ flex: 1, padding: "0.5rem", fontFamily: "inherit" }}
+      <main className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto px-4 py-6">
+          {turns.length === 0 ? (
+            <EmptyState
+              onPick={(s) => setInput(s)}
+              onUpload={() => fileInputRef.current?.click()}
             />
-            <button onClick={sendChat} disabled={chatBusy || !chatInput.trim()}>
-              {chatBusy ? "..." : "Send"}
+          ) : (
+            <div className="space-y-6">
+              {turns.map((t) => (
+                <TurnView key={t.id} turn={t} />
+              ))}
+              {isLoading && <LoadingBubble label={loadingStep} />}
+              <div ref={endRef} />
+            </div>
+          )}
+        </div>
+      </main>
+
+      <footer className="border-t border-white/10 bg-black/95 sticky bottom-0">
+        <div className="max-w-4xl mx-auto px-4 py-4">
+          {selected && (
+            <div className="mb-3 relative inline-block">
+              <img
+                src={selected.dataUrl}
+                alt="seçili"
+                className="h-20 w-20 object-cover rounded-lg border border-white/10"
+              />
+              <button
+                type="button"
+                onClick={clearSelected}
+                className="absolute -top-2 -right-2 w-6 h-6 bg-white rounded-full flex items-center justify-center text-black hover:bg-gray-200 transition-colors"
+                aria-label="Görseli kaldır"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          )}
+          <form onSubmit={handleSubmit} className="flex items-end gap-3">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) pickFile(f);
+              }}
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading}
+              className="flex-shrink-0 w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-gray-500 hover:text-white hover:bg-white/10 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Görsel yükle"
+            >
+              <ImageIcon />
             </button>
-          </div>
-        </section>
-      )}
-
-      {observation && (
-        <details style={{ marginTop: "2rem" }}>
-          <summary>Observation details</summary>
-          <pre
-            style={{
-              background: "#f4f4f4",
-              padding: "1rem",
-              borderRadius: 4,
-              maxHeight: 320,
-              overflow: "auto",
-              fontSize: "0.85rem",
-            }}
-          >
-            {JSON.stringify(observation, null, 2)}
-          </pre>
-        </details>
-      )}
-
-      <details style={{ marginTop: "1rem" }}>
-        <summary>Backend health</summary>
-        {health && (
-          <pre style={{ background: "#f4f4f4", padding: "1rem", borderRadius: 4 }}>
-            {JSON.stringify(health, null, 2)}
-          </pre>
-        )}
-      </details>
-    </main>
+            <div className="flex-1">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
+                placeholder={
+                  selected
+                    ? "Görsel hakkında ne sormak istersiniz? (opsiyonel)"
+                    : turns.some((t) => t.pipeline)
+                    ? "Takip sorusu yazın veya yeni bir görsel yükleyin…"
+                    : "Önce bir görsel yükleyin, sonra prompt yazın…"
+                }
+                rows={1}
+                className="w-full resize-none rounded-xl bg-white/5 border border-white/10 px-5 py-3.5 text-white placeholder-gray-600 focus:outline-none focus:border-white/30 transition-all"
+                style={{ maxHeight: "150px" }}
+                disabled={isLoading}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isLoading || (!selected && !input.trim())}
+              className="flex-shrink-0 w-12 h-12 rounded-xl bg-white text-black flex items-center justify-center hover:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+              title="Gönder (Enter)"
+            >
+              <SendIcon />
+            </button>
+          </form>
+          <p className="text-center text-xs text-gray-700 mt-3">
+            Vision → intent → task graph → agents → markdown. Mesajın altındaki "Pipeline details" ile akışı görebilirsiniz.
+          </p>
+        </div>
+      </footer>
+    </div>
   );
 }
 
-function stepGlyph(status: Step["status"]): string {
-  switch (status) {
-    case "pending":
-      return "·";
-    case "running":
-      return "→";
-    case "done":
-      return "✓";
-    case "failed":
-      return "✗";
+function EmptyState({
+  onPick,
+  onUpload,
+}: {
+  onPick: (text: string) => void;
+  onUpload: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+      <h2 className="text-2xl font-light mb-2">Ogma Optron</h2>
+      <p className="text-gray-500 max-w-md text-sm">
+        Bir ekran görüntüsü yükleyin — sistem niyetinizi tanır, bir görev planı çıkarır, agent'larını çalıştırır ve markdown raporu döndürür.
+      </p>
+      <button
+        onClick={onUpload}
+        className="mt-6 px-5 py-2.5 rounded-xl bg-white text-black text-sm font-medium hover:bg-gray-200 transition-colors"
+      >
+        Görsel yükle
+      </button>
+      <div className="flex flex-wrap gap-3 mt-8 justify-center">
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s}
+            onClick={() => onPick(s)}
+            className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-gray-400 text-sm hover:bg-white/10 hover:text-white transition-all"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TurnView({ turn }: { turn: Turn }) {
+  if (turn.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-2xl px-5 py-4 bg-white text-black">
+          {turn.image && (
+            <img
+              src={turn.image}
+              alt="yüklenen"
+              className="mb-3 max-w-full max-h-64 rounded-lg object-contain bg-white/30"
+            />
+          )}
+          {turn.content && (
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">{turn.content}</p>
+          )}
+          <p className="text-xs mt-2 text-gray-500">{formatTime(turn.timestamp)}</p>
+        </div>
+      </div>
+    );
   }
+
+  if (turn.role === "error") {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[85%] rounded-2xl px-5 py-4 bg-red-500/10 border border-red-500/30 text-red-200">
+          <p className="text-xs text-red-300 mb-1">Hata</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap font-mono">{turn.content}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (turn.role === "system") {
+    return (
+      <div className="flex justify-center">
+        <div className="rounded-full px-4 py-2 bg-white/5 border border-white/10 text-gray-400 text-xs">
+          {turn.content}
+        </div>
+      </div>
+    );
+  }
+
+  // assistant
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[85%] rounded-2xl px-5 py-4 bg-white/5 border border-white/10 text-white">
+        <div className="prose prose-invert prose-sm max-w-none text-sm leading-relaxed">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.content}</ReactMarkdown>
+        </div>
+        {turn.pipeline && <PipelineDetails pipeline={turn.pipeline} />}
+        <p className="text-xs mt-2 text-gray-600">
+          {formatTime(turn.timestamp)}
+          {turn.pipeline && (
+            <span className="ml-2">· {turn.pipeline.run.total_latency_ms} ms · {turn.pipeline.run.traces.length} agents</span>
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function PipelineDetails({ pipeline }: { pipeline: NonNullable<Turn["pipeline"]> }) {
+  const { observation, intent, graph, run } = pipeline;
+  return (
+    <details className="mt-3 text-xs group">
+      <summary className="cursor-pointer text-gray-500 hover:text-gray-300 select-none">
+        Pipeline details
+      </summary>
+      <div className="mt-3 space-y-3 border-l border-white/10 pl-3">
+        <div className="flex flex-wrap gap-3 items-center">
+          <span
+            className={cn(
+              "px-2 py-0.5 rounded border text-[11px] font-mono",
+              INTENT_BG[intent.primary_intent] || INTENT_BG.unknown,
+            )}
+          >
+            {intent.primary_intent}
+          </span>
+          <span className="text-gray-500">
+            image_type: <code className="text-gray-300">{observation.image_type}</code>
+          </span>
+          <span className="text-gray-500">
+            confidence: <code className="text-gray-300">{intent.confidence.toFixed(2)}</code>
+          </span>
+        </div>
+
+        {intent.reasoning && (
+          <div className="text-gray-400 italic">"{intent.reasoning}"</div>
+        )}
+
+        <div className="space-y-1">
+          {run.traces.map((t) => (
+            <div key={t.task_id} className="flex gap-2 items-center text-[11px]">
+              <span
+                className={cn(
+                  "px-1.5 py-0.5 rounded font-mono uppercase tracking-wide",
+                  STATUS_STYLES[t.status],
+                )}
+              >
+                {t.status}
+              </span>
+              <code className="text-gray-300">{t.task_type}</code>
+              <span className="text-gray-500">→ {t.agent_name}</span>
+              <span className="ml-auto text-gray-600">{t.latency_ms} ms</span>
+            </div>
+          ))}
+        </div>
+
+        <details className="text-gray-500">
+          <summary className="cursor-pointer hover:text-gray-300 select-none">
+            graph ({graph.nodes.length} node)
+          </summary>
+          <ul className="mt-2 space-y-1 font-mono text-[11px] text-gray-400">
+            {graph.nodes.map((n) => (
+              <li key={n.task_id}>
+                {n.task_type} → <span className="text-gray-500">{n.required_agent}</span>
+                {n.depends_on.length > 0 && (
+                  <span className="text-gray-600"> · deps: {n.depends_on.map((d) => d.slice(0, 6)).join(", ")}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+
+        {observation.ocr_text && (
+          <details className="text-gray-500">
+            <summary className="cursor-pointer hover:text-gray-300 select-none">
+              OCR text ({observation.ocr_text.length} chars)
+            </summary>
+            <pre className="mt-2 p-2 bg-black/40 border border-white/5 rounded text-[11px] text-gray-400 whitespace-pre-wrap max-h-60 overflow-auto">
+              {observation.ocr_text}
+            </pre>
+          </details>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function LoadingBubble({ label }: { label: string }) {
+  return (
+    <div className="flex justify-start">
+      <div className="bg-white/5 border border-white/10 rounded-2xl px-5 py-4">
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            <span className="w-2 h-2 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+            <span className="w-2 h-2 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+            <span className="w-2 h-2 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+          </div>
+          <span className="text-gray-500 text-sm">{label || "Düşünüyor…"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  );
+}
+
+function ImageIcon() {
+  return (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+    </svg>
+  );
 }
