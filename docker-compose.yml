@@ -1,0 +1,39 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ogma-optron-backend
+    container_name: ogma-optron-backend
+    ports:
+      # Localhost only — do not expose to the network.
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Inside the container, listen on all interfaces;
+      # the host port mapping is what restricts access.
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      # AGENT_CODE_BIN does not work inside Linux containers because
+      # the upstream binary is built for the host (Windows .exe). Leave it
+      # empty in container deployments; CodeAgent will SKIP gracefully.
+      - AGENT_CODE_BIN=
+    volumes:
+      - ./uploads:/app/uploads
+      - ./runs:/app/runs
+      # Persist the SQLite DB on the host. Touch the file first if missing
+      # so Docker doesn't mount a directory in its place.
+      - ./sessions.db:/app/sessions.db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# The frontend (Vite dev server) is intentionally not containerized. Run it
+# from the host so the HMR experience stays fast:
+#   cd frontend && npm install && npm run dev
+# Vite's proxy in vite.config.ts already targets http://127.0.0.1:8000 .
