@@ -26,6 +26,7 @@ from app.clawbridge.workspace_scanner import (
     scan_workspace,
 )
 from app.config import settings
+from app.gitctx.diff import collect_git_context, format_context_block
 from app.repo_index import load_for_workspace, search as index_search
 from app.schemas.asset import utcnow
 from app.schemas.clawbridge import ClawPermissionProfile, ClawRun, ClawRunStatus
@@ -47,7 +48,7 @@ Listed files: {n_files} (truncated: {truncated})
 Listing:
 {file_list}
 
-{semantic_block}Key file contents (each truncated to {max_bytes} bytes):
+{git_block}{semantic_block}Key file contents (each truncated to {max_bytes} bytes):
 {file_contents}
 
 User question: {user_prompt}
@@ -117,14 +118,25 @@ def _build_semantic_block(workspace: Path, user_prompt: str) -> str:
     return "\n".join(parts) + "\n"
 
 
+def _build_git_block(workspace: Path, base_ref: str | None) -> str:
+    """Snapshot of the repo's branch/diff/uncommitted state, or empty string
+    if the workspace is not a git repo (or git isn't on PATH)."""
+    ctx = collect_git_context(workspace, base_ref=base_ref)
+    return format_context_block(ctx)
+
+
 def _build_review_prompt(
-    workspace: Path, scan: WorkspaceScan, user_prompt: str
+    workspace: Path,
+    scan: WorkspaceScan,
+    user_prompt: str,
+    git_base_ref: str | None = None,
 ) -> str:
     return _REVIEW_PROMPT_TEMPLATE.format(
         workspace=str(workspace),
         n_files=len(scan.files),
         truncated=scan.truncated,
         file_list="\n".join(scan.files[:80]),
+        git_block=_build_git_block(workspace, git_base_ref),
         semantic_block=_build_semantic_block(workspace, user_prompt),
         max_bytes=MAX_FILE_BYTES,
         file_contents=_build_file_contents_block(scan.file_contents),
@@ -142,6 +154,7 @@ def run_repo_review(
     profile: ClawPermissionProfile = ClawPermissionProfile.READ_ONLY,
     timeout_s: int = DEFAULT_TIMEOUT_S,
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS,
+    git_base_ref: str | None = None,
 ) -> ClawRun:
     run_id = str(uuid.uuid4())
     started = utcnow()
@@ -173,7 +186,7 @@ def run_repo_review(
         )
 
     scan = scan_workspace(workspace)
-    prompt = _build_review_prompt(workspace, scan, user_prompt)
+    prompt = _build_review_prompt(workspace, scan, user_prompt, git_base_ref=git_base_ref)
 
     env = os.environ.copy()
     env["AGENT_CODE_API_BASE_URL"] = settings.agent_code_api_base_url

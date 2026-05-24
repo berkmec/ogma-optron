@@ -149,6 +149,7 @@ def cmd_review(args: argparse.Namespace) -> int:
             prompt=args.prompt or "Review this repository.",
             permission_profile=ClawPermissionProfile.READ_ONLY,
             timeout_s=args.timeout,
+            git_base_ref=args.base or None,
         )
     )
 
@@ -319,6 +320,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument(
         "--timeout", type=int, default=120,
         help="Subprocess timeout in seconds (default 120).",
+    )
+    sp.add_argument(
+        "--base", "-b", default="",
+        help="Git base ref for the diff (branch / SHA / HEAD~N). Default: origin/main, then main, then HEAD~5.",
     )
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_review)

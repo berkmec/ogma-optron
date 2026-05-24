@@ -20,6 +20,7 @@ class ReviewRequest(BaseModel):
     permission_profile: ClawPermissionProfile = ClawPermissionProfile.READ_ONLY
     timeout_s: int = DEFAULT_TIMEOUT_S
     max_output_chars: int = DEFAULT_MAX_OUTPUT_CHARS
+    git_base_ref: str | None = None
 
 
 @router.post("/review", response_model=ClawRun)
@@ -30,6 +31,7 @@ def review(req: ReviewRequest) -> ClawRun:
         profile=req.permission_profile,
         timeout_s=req.timeout_s,
         max_output_chars=req.max_output_chars,
+        git_base_ref=req.git_base_ref,
     )
     sqlite_store.save_claw_run(run)
     return run
