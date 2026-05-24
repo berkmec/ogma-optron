@@ -20,6 +20,7 @@ from app.schemas.observation import VisualObservation
 from app.schemas.report import Report
 from app.schemas.repo_index import RepoIndexInfo
 from app.schemas.task_graph import TaskGraph
+from app.schemas.workflow import WorkflowSession
 
 DB_PATH = REPO_ROOT / "sessions.db"
 
@@ -104,6 +105,13 @@ CREATE TABLE IF NOT EXISTS repo_indexes (
     created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_repo_indexes_workspace ON repo_indexes(workspace_path, created_at);
+CREATE TABLE IF NOT EXISTS workflow_sessions (
+    session_id     TEXT PRIMARY KEY,
+    title          TEXT NOT NULL DEFAULT '',
+    data           TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflows_created ON workflow_sessions(created_at);
 """
 
 
@@ -358,6 +366,37 @@ def get_repo_index(index_id: str) -> RepoIndexInfo | None:
             "SELECT data FROM repo_indexes WHERE index_id = ?", (index_id,)
         ).fetchone()
     return RepoIndexInfo.model_validate_json(row["data"]) if row else None
+
+
+def save_workflow_session(session: WorkflowSession) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO workflow_sessions"
+            "(session_id, title, data, created_at) VALUES (?, ?, ?, ?)",
+            (
+                session.session_id,
+                session.title,
+                session.model_dump_json(),
+                session.created_at.isoformat(),
+            ),
+        )
+
+
+def get_workflow_session(session_id: str) -> WorkflowSession | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT data FROM workflow_sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+    return WorkflowSession.model_validate_json(row["data"]) if row else None
+
+
+def list_workflow_sessions(limit: int = 30) -> list[WorkflowSession]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT data FROM workflow_sessions ORDER BY created_at DESC LIMIT ?",
+            (max(1, min(limit, 100)),),
+        ).fetchall()
+    return [WorkflowSession.model_validate_json(r["data"]) for r in rows]
 
 
 def list_repo_indexes(workspace_path: str | None = None) -> list[RepoIndexInfo]:

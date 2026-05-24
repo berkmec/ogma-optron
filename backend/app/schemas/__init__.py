@@ -7,6 +7,7 @@ from app.schemas.observation import ImageType, VisualObservation
 from app.schemas.report import Report
 from app.schemas.repo_index import RepoIndexInfo, SearchHit, SearchResponse
 from app.schemas.task_graph import TaskGraph, TaskNode, TaskStatus
+from app.schemas.workflow import WorkflowSession
 
 __all__ = [
     "VisualAsset",
@@ -29,4 +30,5 @@ __all__ = [
     "RepoIndexInfo",
     "SearchHit",
     "SearchResponse",
+    "WorkflowSession",
 ]

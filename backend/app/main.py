@@ -15,6 +15,7 @@ from app.api import repo_index as repo_index_api
 from app.api import sessions as sessions_api
 from app.api import task_graph as task_graph_api
 from app.api import upload as upload_api
+from app.api import workflows as workflows_api
 from app.config import settings
 from app.services.sqlite_store import init_db
 
@@ -45,6 +46,7 @@ app.include_router(clawbridge_api.router)
 app.include_router(chat_api.router)
 app.include_router(sessions_api.router)
 app.include_router(repo_index_api.router)
+app.include_router(workflows_api.router)
 
 
 def _health_payload() -> dict:

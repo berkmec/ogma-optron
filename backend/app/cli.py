@@ -209,6 +209,52 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return subprocess.call([sys.executable, str(script), *(args.extra or [])])
 
 
+def cmd_workflow(args: argparse.Namespace) -> int:
+    init_db()
+    image_paths = [Path(p).expanduser().resolve() for p in args.images]
+    missing = [p for p in image_paths if not p.exists() or not p.is_file()]
+    if missing:
+        for p in missing:
+            print(f"ERROR: image not found: {p}", file=sys.stderr)
+        return 2
+
+    from app.api.analyze import AnalyzeRequest, analyze as analyze_handler
+    from app.api.workflows import CreateWorkflowRequest, create as create_handler
+
+    observation_ids: list[str] = []
+    for i, image_path in enumerate(image_paths):
+        print(f"[{i + 1}/{len(image_paths)}] analysing {image_path.name} ...")
+        asset = file_store.save_upload_from_path(image_path)
+        sqlite_store.save_asset(asset)
+        observation = analyze_handler(AnalyzeRequest(asset_id=asset.asset_id))
+        observation_ids.append(observation.observation_id)
+        print(f"    image_type={observation.image_type.value}  obs={observation.observation_id[:8]}...")
+
+    print(f"\nsynthesising {len(observation_ids)} observations ...")
+    session = create_handler(
+        CreateWorkflowRequest(
+            observation_ids=observation_ids,
+            title=args.title or "",
+            user_prompt=args.prompt or "",
+            synthesise=True,
+        )
+    )
+
+    if args.json:
+        print(json.dumps(_dump_pydantic(session), indent=2, default=str))
+        return 0
+
+    print(f"session_id:    {session.session_id}")
+    print(f"observations:  {len(session.observation_ids)}")
+    print(f"model:         {session.model_used}")
+    print(f"latency_ms:    {session.latency_ms}")
+    print()
+    print("=" * 72)
+    print(session.synthesis_markdown or "(no synthesis)")
+    print("=" * 72)
+    return 0
+
+
 def cmd_index(args: argparse.Namespace) -> int:
     init_db()
     workspace = Path(args.workspace).expanduser().resolve()
@@ -350,6 +396,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extra args passed to scripts/run_eval.py.",
     )
     sp.set_defaults(func=cmd_eval)
+
+    sp = sub.add_parser(
+        "workflow",
+        help="Analyse multiple screenshots in order and produce a workflow-level synthesis.",
+    )
+    sp.add_argument("images", nargs="+", help="Two or more image paths, in order.")
+    sp.add_argument(
+        "--prompt", "-p", default="",
+        help="Optional user prompt describing what the flow is about.",
+    )
+    sp.add_argument(
+        "--title", "-t", default="", help="Optional human-readable title for the session.",
+    )
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_workflow)
 
     sp = sub.add_parser(
         "index",
