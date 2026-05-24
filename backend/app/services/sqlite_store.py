@@ -18,6 +18,7 @@ from app.schemas.clawbridge import ClawRun
 from app.schemas.intent import IntentResult
 from app.schemas.observation import VisualObservation
 from app.schemas.report import Report
+from app.schemas.repo_index import RepoIndexInfo
 from app.schemas.task_graph import TaskGraph
 
 DB_PATH = REPO_ROOT / "sessions.db"
@@ -96,6 +97,13 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     FOREIGN KEY (observation_id) REFERENCES observations(observation_id)
 );
 CREATE INDEX IF NOT EXISTS idx_chat_observation ON chat_messages(observation_id, created_at);
+CREATE TABLE IF NOT EXISTS repo_indexes (
+    index_id       TEXT PRIMARY KEY,
+    workspace_path TEXT NOT NULL,
+    data           TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_repo_indexes_workspace ON repo_indexes(workspace_path, created_at);
 """
 
 
@@ -328,6 +336,43 @@ def get_latest_report_for_observation(observation_id: str) -> Report | None:
             (observation_id,),
         ).fetchone()
     return Report.model_validate_json(row["data"]) if row else None
+
+
+def save_repo_index(info: RepoIndexInfo) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO repo_indexes"
+            "(index_id, workspace_path, data, created_at) VALUES (?, ?, ?, ?)",
+            (
+                info.index_id,
+                info.workspace_path,
+                info.model_dump_json(),
+                info.created_at.isoformat(),
+            ),
+        )
+
+
+def get_repo_index(index_id: str) -> RepoIndexInfo | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT data FROM repo_indexes WHERE index_id = ?", (index_id,)
+        ).fetchone()
+    return RepoIndexInfo.model_validate_json(row["data"]) if row else None
+
+
+def list_repo_indexes(workspace_path: str | None = None) -> list[RepoIndexInfo]:
+    with connect() as conn:
+        if workspace_path:
+            rows = conn.execute(
+                "SELECT data FROM repo_indexes WHERE workspace_path = ?"
+                " ORDER BY created_at DESC",
+                (workspace_path,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT data FROM repo_indexes ORDER BY created_at DESC"
+            ).fetchall()
+    return [RepoIndexInfo.model_validate_json(r["data"]) for r in rows]
 
 
 def get_latest_observation_for_asset(asset_id: str) -> VisualObservation | None:

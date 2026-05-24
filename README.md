@@ -155,10 +155,12 @@ optron health
 optron analyze .\screenshot.png -p "What does this error mean?"
 optron review  -w .\my-repo  -p "Focus on test coverage."
 optron chat    <observation_id> "Follow-up question"
+optron index   -w .\my-repo                               # build semantic index
+optron search  -w .\my-repo "where do we init the schema?" -k 5
 optron eval
 ```
 
-See [`docs/cli.md`](docs/cli.md) for all subcommands, output formats, and exit codes.
+See [`docs/cli.md`](docs/cli.md) for all subcommands and [`docs/repo-intelligence.md`](docs/repo-intelligence.md) for the semantic-search layer that powers `index` / `search` and re-prioritises `review`.
 
 ## API surface
 

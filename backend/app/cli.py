@@ -208,6 +208,78 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return subprocess.call([sys.executable, str(script), *(args.extra or [])])
 
 
+def cmd_index(args: argparse.Namespace) -> int:
+    init_db()
+    workspace = Path(args.workspace).expanduser().resolve()
+    if not workspace.exists() or not workspace.is_dir():
+        print(f"ERROR: workspace not found: {workspace}", file=sys.stderr)
+        return 2
+
+    from app import repo_index as repo_index_pkg
+
+    print(f"indexing {workspace} ...")
+    try:
+        info = repo_index_pkg.build_index(str(workspace), model_name=args.model)
+    except FileNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    sqlite_store.save_repo_index(info)
+
+    if args.json:
+        print(json.dumps(_dump_pydantic(info), indent=2, default=str))
+    else:
+        print(f"index_id:       {info.index_id}")
+        print(f"workspace:      {info.workspace_path}")
+        print(f"model:          {info.model}")
+        print(f"n_files:        {info.n_files}")
+        print(f"n_chunks:       {info.n_chunks}")
+        print(f"created_at:     {info.created_at.isoformat()}")
+    return 0
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    init_db()
+    workspace = Path(args.workspace).expanduser().resolve()
+    from app import repo_index as repo_index_pkg
+
+    loaded = repo_index_pkg.load_for_workspace(str(workspace))
+    if loaded is None:
+        print(
+            f"ERROR: no index for {workspace}. Run `optron index -w {workspace}` first.",
+            file=sys.stderr,
+        )
+        return 2
+    hits = repo_index_pkg.search(
+        loaded, args.query, k_files=args.k, chunks_per_file=args.per_file
+    )
+
+    if args.json:
+        out = {
+            "query": args.query,
+            "index_id": loaded.info.index_id,
+            "workspace_path": loaded.info.workspace_path,
+            "hits": [
+                {
+                    "file_path": path,
+                    "score": score,
+                    "excerpts": [c.text[:600] for c in chunks],
+                }
+                for path, score, chunks in hits
+            ],
+        }
+        print(json.dumps(out, indent=2, default=str))
+    else:
+        print(f"query:    {args.query}")
+        print(f"index:    {loaded.info.index_id[:8]}...  ({loaded.info.n_files} files, {loaded.info.n_chunks} chunks)")
+        print(f"hits:     {len(hits)}")
+        for i, (path, score, chunks) in enumerate(hits, 1):
+            print(f"\n  {i:>2}. {path}  (score {score:.3f})")
+            for chunk in chunks:
+                excerpt = chunk.text[:400].replace("\n", " ")
+                print(f"      [{chunk.chunk_index}] {excerpt}...")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="optron",
@@ -273,6 +345,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extra args passed to scripts/run_eval.py.",
     )
     sp.set_defaults(func=cmd_eval)
+
+    sp = sub.add_parser(
+        "index",
+        help="Build a semantic index over a workspace (chunker + embedder + numpy store).",
+    )
+    sp.add_argument("--workspace", "-w", required=True, help="Workspace path to index.")
+    sp.add_argument(
+        "--model",
+        default="BAAI/bge-small-en-v1.5",
+        help="fastembed model name (default: BAAI/bge-small-en-v1.5).",
+    )
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_index)
+
+    sp = sub.add_parser(
+        "search",
+        help="Semantic search over an already-built index.",
+    )
+    sp.add_argument("--workspace", "-w", required=True, help="Indexed workspace path.")
+    sp.add_argument("query", help="Search query (quote multi-word).")
+    sp.add_argument("-k", type=int, default=10, help="Top-K files (default 10).")
+    sp.add_argument(
+        "--per-file", type=int, default=2, help="Chunks shown per file (default 2)."
+    )
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_search)
 
     return p
 

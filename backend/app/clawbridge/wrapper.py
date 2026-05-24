@@ -26,6 +26,7 @@ from app.clawbridge.workspace_scanner import (
     scan_workspace,
 )
 from app.config import settings
+from app.repo_index import load_for_workspace, search as index_search
 from app.schemas.asset import utcnow
 from app.schemas.clawbridge import ClawPermissionProfile, ClawRun, ClawRunStatus
 
@@ -46,7 +47,7 @@ Listed files: {n_files} (truncated: {truncated})
 Listing:
 {file_list}
 
-Key file contents (each truncated to {max_bytes} bytes):
+{semantic_block}Key file contents (each truncated to {max_bytes} bytes):
 {file_contents}
 
 User question: {user_prompt}
@@ -57,8 +58,9 @@ Write a concise markdown review:
 ## Concerns or open questions
 ## Suggested follow-ups
 
-Stay grounded in the listing above. Do not invent files that are not
-present. If the evidence is thin for any heading, say so briefly.
+Stay grounded in the listing and any semantic-search excerpts above. Do not
+invent files that are not present. If the evidence is thin for any heading,
+say so briefly.
 """
 
 
@@ -92,6 +94,29 @@ def _build_file_contents_block(file_contents: dict[str, str]) -> str:
     return "\n\n".join(parts)
 
 
+def _build_semantic_block(workspace: Path, user_prompt: str) -> str:
+    """If a repo_index exists for this workspace, return a markdown block of
+    the top-K semantic-search hits. Empty string when no index is available
+    or the search yields nothing."""
+    query = user_prompt.strip() or "What does this repository do? Architecture, key modules, risks."
+    loaded = load_for_workspace(str(workspace))
+    if loaded is None:
+        return ""
+    hits = index_search(loaded, query, k_files=10, chunks_per_file=2)
+    if not hits:
+        return ""
+    parts = [
+        "Semantic-search excerpts (most relevant chunks to the user's question):\n",
+    ]
+    for file_path, score, chunks in hits:
+        parts.append(f"### {file_path}  (score {score:.3f})")
+        for chunk in chunks:
+            excerpt = chunk.text[:1500]
+            parts.append(f"```\n{excerpt}\n```")
+    parts.append("")  # trailing newline before "Key file contents" header
+    return "\n".join(parts) + "\n"
+
+
 def _build_review_prompt(
     workspace: Path, scan: WorkspaceScan, user_prompt: str
 ) -> str:
@@ -100,6 +125,7 @@ def _build_review_prompt(
         n_files=len(scan.files),
         truncated=scan.truncated,
         file_list="\n".join(scan.files[:80]),
+        semantic_block=_build_semantic_block(workspace, user_prompt),
         max_bytes=MAX_FILE_BYTES,
         file_contents=_build_file_contents_block(scan.file_contents),
         user_prompt=user_prompt.strip() or "Review this repository.",
