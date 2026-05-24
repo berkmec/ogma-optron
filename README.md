@@ -144,6 +144,22 @@ pytest tests/ -v
 ruff check app tests --select=E,F,B --ignore=E501
 ```
 
+### 6. CLI (`optron`)
+
+A terminal entry point to the full pipeline, no uvicorn required.
+
+```powershell
+pip install -e backend
+optron --version
+optron health
+optron analyze .\screenshot.png -p "What does this error mean?"
+optron review  -w .\my-repo  -p "Focus on test coverage."
+optron chat    <observation_id> "Follow-up question"
+optron eval
+```
+
+See [`docs/cli.md`](docs/cli.md) for all subcommands, output formats, and exit codes.
+
 ## API surface
 
 | Method | Path | Returns |
